@@ -2,7 +2,14 @@
 // Background Service Worker - Handles Gemini API Communication
 // ============================================================
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
+const GEMINI_MODELS = [
+  "gemini-3.8-flash",      // Primary - fast & free
+  "gemini-3.8-flash-lite", // Fallback - lighter, less load
+];
+
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000; // Start with 2s, doubles each retry
 
 // Listen for messages from content script or popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -10,7 +17,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleSolveQuestions(request.data)
       .then(sendResponse)
       .catch(err => sendResponse({ error: err.message }));
-    return true; // Keep the message channel open for async response
+    return true;
   }
 
   if (request.action === "analyzeVideoContext") {
@@ -40,24 +47,74 @@ async function getApiKey() {
 }
 
 /**
+ * Sleep helper for retry delays
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * Test if the API key is valid
  */
 async function testApiKey(apiKey) {
   try {
-    const response = await callGeminiAPI(apiKey, "Say 'API key is working!' in exactly those words.");
+    const response = await callGeminiWithRetry(apiKey, "Say 'API key is working!' in exactly those words.");
     if (response) {
       return { success: true, message: "API key is valid!" };
     }
   } catch (err) {
-    return { success: false, message: `Invalid API key: ${err.message}` };
+    return { success: false, message: err.message };
   }
 }
 
 /**
- * Call the Gemini API
+ * Call Gemini API with automatic retry and model fallback
+ * Tries each model with retries before falling back to the next model
  */
-async function callGeminiAPI(apiKey, prompt, systemInstruction = null) {
-  const url = `${GEMINI_API_URL}?key=${apiKey}`;
+async function callGeminiWithRetry(apiKey, prompt, systemInstruction = null) {
+  let lastError = null;
+
+  for (const model of GEMINI_MODELS) {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`[Auto MCQ] Trying ${model} (attempt ${attempt}/${MAX_RETRIES})...`);
+        const result = await callGeminiAPI(apiKey, prompt, systemInstruction, model);
+        console.log(`[Auto MCQ] ✅ Success with ${model}`);
+        return result;
+      } catch (err) {
+        lastError = err;
+        console.warn(`[Auto MCQ] ${model} attempt ${attempt} failed: ${err.message}`);
+
+        // Don't retry on auth errors (401/403) - key is wrong
+        if (err.message.includes("401") || err.message.includes("403")) {
+          throw new Error("Invalid API key. Please check your key in the popup.");
+        }
+
+        // Don't retry on 404 - model doesn't exist
+        if (err.message.includes("404")) {
+          console.warn(`[Auto MCQ] Model ${model} not available, trying next...`);
+          break; // Skip to next model
+        }
+
+        // For 429 (rate limit) or 503 (overloaded), retry with backoff
+        if (attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+          console.log(`[Auto MCQ] Retrying in ${delay}ms...`);
+          await sleep(delay);
+        }
+      }
+    }
+    console.log(`[Auto MCQ] All retries exhausted for ${model}, trying next model...`);
+  }
+
+  throw new Error(`All models failed after retries. Last error: ${lastError?.message || "Unknown error"}`);
+}
+
+/**
+ * Call the Gemini API (single attempt)
+ */
+async function callGeminiAPI(apiKey, prompt, systemInstruction = null, model = "gemini-3.8-flash") {
+  const url = `${API_BASE}/${model}:generateContent?key=${apiKey}`;
 
   const requestBody = {
     contents: [
@@ -140,15 +197,13 @@ Response format (strict JSON array):
 
   prompt += "\nAnalyze each question carefully and respond with the JSON array as specified.";
 
-  const responseText = await callGeminiAPI(apiKey, prompt, systemPrompt);
+  const responseText = await callGeminiWithRetry(apiKey, prompt, systemPrompt);
 
   // Parse the JSON response - handle potential markdown wrapping
   let answers;
   try {
-    // Try direct parse first
     answers = JSON.parse(responseText);
   } catch {
-    // Try extracting JSON from markdown code blocks
     const jsonMatch = responseText.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       answers = JSON.parse(jsonMatch[0]);
@@ -173,9 +228,8 @@ async function handleAnalyzeVideo(data) {
 
   const systemPrompt = `You are a lecture summarizer. Summarize the key points, facts, definitions, and concepts from this lecture/video transcript. Focus on information that would be asked in a quiz. Be concise but thorough.`;
 
-  const summary = await callGeminiAPI(apiKey, transcript, systemPrompt);
+  const summary = await callGeminiWithRetry(apiKey, transcript, systemPrompt);
   return { success: true, summary };
 }
 
-// Log when service worker starts
 console.log("Auto MCQ Solver: Background service worker started");
