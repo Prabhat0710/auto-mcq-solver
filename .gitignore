@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets - NEVER commit API keys
+*.key
+.env
+.env.local
+
+# Extension packaging
+*.crx
+*.pem
+*.zip
