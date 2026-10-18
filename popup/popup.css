@@ -1,0 +1,247 @@
+/* ============================================================
+   Auto MCQ Solver - Popup Styles
+   ============================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #fafbff;
+  color: #1e1b4b;
+}
+
+.container {
+  padding: 20px;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+h1 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e1b4b;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+/* Sections */
+.section {
+  margin-bottom: 16px;
+}
+
+.label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+/* Input */
+.input-group {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.input-group input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 13px;
+  background: white;
+  color: #1e1b4b;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-group input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.input-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  background: white;
+  color: #4b5563;
+  border: 1.5px solid #e5e7eb;
+}
+
+.btn-secondary:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.btn-icon {
+  width: 40px;
+  height: 40px;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  background: white;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-full {
+  width: 100%;
+}
+
+.btn-large {
+  padding: 12px 16px;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-row .btn {
+  flex: 1;
+}
+
+/* Status */
+.status-msg {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.status-success {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.status-error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.status-info {
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+
+/* Help link */
+.help-link {
+  display: block;
+  font-size: 12px;
+  color: #6366f1;
+  text-decoration: none;
+  margin-top: 4px;
+}
+
+.help-link:hover {
+  text-decoration: underline;
+}
+
+/* Page info */
+.page-info {
+  background: white;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.info-text {
+  font-size: 13px;
+  color: #4b5563;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Divider */
+.divider {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 16px 0;
+}
+
+/* Footer */
+.footer {
+  text-align: center;
+  padding-top: 8px;
+}
+
+.footer p {
+  font-size: 11px;
+  color: #9ca3af;
+}

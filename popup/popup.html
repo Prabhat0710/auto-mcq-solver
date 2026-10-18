@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto MCQ Solver</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5">
+          <path d="M9 11l3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Auto MCQ Solver</h1>
+        <p class="subtitle">AI-Powered Quiz Assistant</p>
+      </div>
+    </div>
+
+    <!-- API Key Section -->
+    <div class="section">
+      <label class="label">Gemini API Key</label>
+      <div class="input-group">
+        <input type="password" id="apiKey" placeholder="Enter your Gemini API key..." />
+        <button id="toggleKey" class="btn-icon" title="Show/Hide">👁️</button>
+      </div>
+      <div class="input-actions">
+        <button id="saveKey" class="btn btn-primary">Save Key</button>
+        <button id="testKey" class="btn btn-secondary">Test</button>
+      </div>
+      <div id="keyStatus" class="status-msg" style="display:none;"></div>
+      <a href="https://aistudio.google.com/apikey" target="_blank" class="help-link">
+        🔑 Get free API key from Google AI Studio
+      </a>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Page Info -->
+    <div class="section">
+      <label class="label">Current Page</label>
+      <div id="pageInfo" class="page-info">
+        <div class="info-row">
+          <span>📄</span>
+          <span id="pageTitle" class="info-text">Loading...</span>
+        </div>
+        <div class="info-row">
+          <span>📝</span>
+          <span id="questionCount" class="info-text">-</span>
+        </div>
+        <div class="info-row">
+          <span>🎬</span>
+          <span id="videoInfo" class="info-text">-</span>
+        </div>
+      </div>
+      <button id="refreshInfo" class="btn btn-secondary btn-full">🔄 Refresh Page Scan</button>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Actions -->
+    <div class="section">
+      <label class="label">Actions</label>
+      <button id="solveBtn" class="btn btn-primary btn-full btn-large">
+        🧠 Solve All Questions
+      </button>
+      <div class="btn-row">
+        <button id="extractBtn" class="btn btn-secondary">📋 Extract</button>
+        <button id="videoBtn" class="btn btn-secondary">🎬 Video Context</button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p>Use responsibly • Powered by Gemini AI</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
