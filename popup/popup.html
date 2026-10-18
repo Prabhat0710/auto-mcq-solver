@@ -11,14 +11,43 @@
     <!-- Header -->
     <div class="header">
       <div class="logo">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5">
           <path d="M9 11l3 3L22 4"/>
           <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
         </svg>
       </div>
       <div>
         <h1>Auto MCQ Solver</h1>
-        <p class="subtitle">AI-Powered Quiz Assistant</p>
+        <p class="subtitle">AI-Powered Quiz & Course Assistant</p>
+      </div>
+    </div>
+
+    <!-- Auto-Pilot Control Card -->
+    <div class="autopilot-card">
+      <div class="autopilot-header">
+        <div class="autopilot-title">
+          <span class="ap-icon">🚀</span>
+          <div>
+            <h3>Auto-Pilot Mode</h3>
+            <p>Auto-solve, auto-submit & auto-advance</p>
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="autoPilotToggle">
+          <span class="slider round"></span>
+        </label>
+      </div>
+      <div class="autopilot-options">
+        <div class="option-row">
+          <span>🎬 Video Speed:</span>
+          <select id="videoSpeedSelect">
+            <option value="1">1x (Normal)</option>
+            <option value="2" selected>2x (Fast)</option>
+            <option value="4">4x (Super Fast)</option>
+            <option value="8">8x (Extreme)</option>
+            <option value="16">16x (Max)</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -43,7 +72,7 @@
 
     <!-- Page Info -->
     <div class="section">
-      <label class="label">Current Page</label>
+      <label class="label">Current Page Scan</label>
       <div id="pageInfo" class="page-info">
         <div class="info-row">
           <span>📄</span>
@@ -57,27 +86,34 @@
           <span>🎬</span>
           <span id="videoInfo" class="info-text">-</span>
         </div>
+        <div class="info-row">
+          <span>➡️</span>
+          <span id="nextBtnInfo" class="info-text">-</span>
+        </div>
       </div>
       <button id="refreshInfo" class="btn btn-secondary btn-full">🔄 Refresh Page Scan</button>
     </div>
 
     <hr class="divider">
 
-    <!-- Actions -->
+    <!-- Manual Actions -->
     <div class="section">
-      <label class="label">Actions</label>
+      <label class="label">Manual Actions</label>
       <button id="solveBtn" class="btn btn-primary btn-full btn-large">
-        🧠 Solve All Questions
+        🧠 Solve Current Questions
+      </button>
+      <button id="nextBtn" class="btn btn-secondary btn-full" style="margin-bottom: 8px;">
+        ➡️ Click Next / Submit
       </button>
       <div class="btn-row">
         <button id="extractBtn" class="btn btn-secondary">📋 Extract</button>
-        <button id="videoBtn" class="btn btn-secondary">🎬 Video Context</button>
+        <button id="videoBtn" class="btn btn-secondary">🎬 Transcript</button>
       </div>
     </div>
 
     <!-- Footer -->
     <div class="footer">
-      <p>Use responsibly • Powered by Gemini AI</p>
+      <p>Continuous Auto-Pilot • Powered by Gemini AI</p>
     </div>
   </div>
 

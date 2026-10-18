@@ -1,5 +1,5 @@
 // ============================================================
-// Content Script - Scrapes MCQs and Video Context from Pages
+// Content Script - Auto MCQ Solver & Auto-Pilot Engine
 // ============================================================
 
 (function () {
@@ -11,12 +11,29 @@
 
   // ---- State ----
   let isProcessing = false;
+  let autoPilotEnabled = false;
+  let autoPilotVideoSpeed = 2.0;
+  let autoPilotTimer = null;
+  let consecutiveStallCount = 0;
+  let lastProcessedSignature = "";
+
   let floatingBtn = null;
   let statusPanel = null;
+  let autoPilotHUD = null;
 
-  // ---- Create Floating Action Button ----
+  // ---- Initialize from Storage ----
+  chrome.storage.local.get(["autoPilotEnabled", "autoPilotVideoSpeed"], (res) => {
+    autoPilotEnabled = !!res.autoPilotEnabled;
+    if (res.autoPilotVideoSpeed) autoPilotVideoSpeed = parseFloat(res.autoPilotVideoSpeed);
+    updateHUD();
+    if (autoPilotEnabled) {
+      startAutoPilotLoop();
+    }
+  });
+
+  // ---- Create Floating UI ----
   function createFloatingUI() {
-    // Main solve button
+    // 1. Floating Action Button (FAB)
     floatingBtn = document.createElement("div");
     floatingBtn.id = "amcq-fab";
     floatingBtn.innerHTML = `
@@ -27,27 +44,51 @@
         </svg>
       </div>
       <div class="amcq-fab-menu" style="display:none;">
+        <button class="amcq-menu-btn amcq-menu-autopilot" data-action="toggle-autopilot">
+          🚀 <span class="amcq-ap-label">Start Auto-Pilot</span>
+        </button>
         <button class="amcq-menu-btn" data-action="solve">🧠 Solve Questions</button>
+        <button class="amcq-menu-btn" data-action="next">➡️ Click Next / Submit</button>
         <button class="amcq-menu-btn" data-action="extract">📋 Extract Only</button>
         <button class="amcq-menu-btn" data-action="video">🎬 Get Video Context</button>
       </div>
     `;
     document.body.appendChild(floatingBtn);
 
-    // Status panel
+    // 2. Status Panel (notifications)
     statusPanel = document.createElement("div");
     statusPanel.id = "amcq-status";
     statusPanel.style.display = "none";
     document.body.appendChild(statusPanel);
 
-    // Event listeners
+    // 3. Auto-Pilot Top HUD
+    autoPilotHUD = document.createElement("div");
+    autoPilotHUD.id = "amcq-autopilot-hud";
+    autoPilotHUD.style.display = "none";
+    autoPilotHUD.innerHTML = `
+      <div class="amcq-hud-content">
+        <span class="amcq-hud-pulse"></span>
+        <span class="amcq-hud-text">🚀 <b>Auto-Pilot ACTIVE:</b> <span id="amcq-hud-step">Scanning...</span></span>
+        <button id="amcq-hud-stop" title="Stop Auto-Pilot">⏹️ Stop</button>
+      </div>
+    `;
+    document.body.appendChild(autoPilotHUD);
+
+    // HUD Stop button event
+    autoPilotHUD.querySelector("#amcq-hud-stop").addEventListener("click", () => {
+      setAutoPilot(false);
+    });
+
+    // FAB Events
     floatingBtn.querySelector(".amcq-fab-btn").addEventListener("click", toggleMenu);
 
     floatingBtn.querySelectorAll(".amcq-menu-btn").forEach(btn => {
       btn.addEventListener("click", (e) => {
-        const action = e.target.dataset.action;
-        toggleMenu(); // close menu
+        const action = e.currentTarget.dataset.action;
+        toggleMenu();
+        if (action === "toggle-autopilot") setAutoPilot(!autoPilotEnabled);
         if (action === "solve") startSolving();
+        if (action === "next") manualClickNext();
         if (action === "extract") extractAndShow();
         if (action === "video") extractVideoContext();
       });
@@ -59,20 +100,349 @@
     menu.style.display = menu.style.display === "none" ? "flex" : "none";
   }
 
-  function showStatus(msg, type = "info") {
+  function showStatus(msg, type = "info", duration = 4000) {
     statusPanel.style.display = "block";
     statusPanel.className = `amcq-status-${type}`;
     statusPanel.textContent = msg;
     if (type === "success" || type === "error") {
-      setTimeout(() => { statusPanel.style.display = "none"; }, 5000);
+      setTimeout(() => { statusPanel.style.display = "none"; }, duration);
     }
+  }
+
+  function setHUDStep(text) {
+    if (autoPilotHUD) {
+      const stepEl = autoPilotHUD.querySelector("#amcq-hud-step");
+      if (stepEl) stepEl.textContent = text;
+    }
+  }
+
+  function updateHUD() {
+    if (!autoPilotHUD) return;
+    autoPilotHUD.style.display = autoPilotEnabled ? "block" : "none";
+    const label = floatingBtn?.querySelector(".amcq-ap-label");
+    if (label) {
+      label.textContent = autoPilotEnabled ? "Stop Auto-Pilot" : "Start Auto-Pilot";
+    }
+  }
+
+  // ---- Auto-Pilot Control ----
+
+  function setAutoPilot(enable) {
+    autoPilotEnabled = enable;
+    chrome.storage.local.set({ autoPilotEnabled: enable });
+    updateHUD();
+
+    if (enable) {
+      showStatus("🚀 Auto-Pilot Started! Sit back and relax.", "success");
+      consecutiveStallCount = 0;
+      lastProcessedSignature = "";
+      startAutoPilotLoop();
+    } else {
+      if (autoPilotTimer) {
+        clearTimeout(autoPilotTimer);
+        autoPilotTimer = null;
+      }
+      showStatus("⏹️ Auto-Pilot Paused.", "info");
+      setHUDStep("Paused");
+    }
+  }
+
+  function startAutoPilotLoop() {
+    if (autoPilotTimer) clearTimeout(autoPilotTimer);
+    if (!autoPilotEnabled) return;
+
+    autoPilotStep();
+  }
+
+  function scheduleNextStep(delayMs = 2500) {
+    if (autoPilotTimer) clearTimeout(autoPilotTimer);
+    if (!autoPilotEnabled) return;
+
+    autoPilotTimer = setTimeout(() => {
+      autoPilotStep();
+    }, delayMs);
+  }
+
+  /**
+   * Main Autonomous Decision Loop
+   */
+  async function autoPilotStep() {
+    if (!autoPilotEnabled) return;
+
+    try {
+      // 1. Check if there are unanswered MCQs on screen
+      const questions = extractQuestions();
+      const hasUnanswered = questions.some(q => !isQuestionAnswered(q));
+
+      if (questions.length > 0 && hasUnanswered) {
+        const sig = "mcq_" + questions.map(q => q.questionText.substring(0, 30)).join("|");
+        if (sig === lastProcessedSignature) {
+          consecutiveStallCount++;
+          if (consecutiveStallCount >= 4) {
+            setHUDStep("Waiting for page change or user action...");
+            scheduleNextStep(3500);
+            return;
+          }
+        } else {
+          consecutiveStallCount = 0;
+          lastProcessedSignature = sig;
+        }
+
+        setHUDStep(`Solving ${questions.length} MCQ(s)...`);
+        showStatus(`🧠 Auto-Pilot: Solving ${questions.length} question(s)...`, "info");
+        
+        await startSolving();
+
+        // After solving, wait for DOM update, then click Next/Submit
+        setHUDStep("Answers selected. Clicking Next...");
+        await sleep(1500);
+        const clicked = clickNextOrSubmitButton();
+        if (clicked) {
+          showStatus("➡️ Auto-Pilot: Clicked Next / Submit!", "info", 2000);
+        }
+        scheduleNextStep(3000);
+        return;
+      }
+
+      // 2. If questions exist and are ALREADY answered, advance to next question/lesson
+      if (questions.length > 0 && !hasUnanswered) {
+        setHUDStep("Questions already answered. Advancing...");
+        const clicked = clickNextOrSubmitButton();
+        if (clicked) {
+          showStatus("➡️ Advancing to next...", "info", 2000);
+          scheduleNextStep(3000);
+          return;
+        }
+      }
+
+      // 3. Check for HTML5 Video
+      const video = document.querySelector("video");
+      if (video && isElementVisible(video)) {
+        handleVideoAutoPilot(video);
+        return;
+      }
+
+      // 4. Check for Next Lesson / Continue button on pure reading / completed screens
+      const nextBtn = findNextOrSubmitButton();
+      if (nextBtn) {
+        const btnText = (nextBtn.textContent || "").trim();
+        setHUDStep(`Clicking '${btnText || "Next"}'...`);
+        showStatus(`➡️ Auto-Pilot: Advancing (${btnText || "Next"})...`, "info", 2000);
+        humanClick(nextBtn);
+        scheduleNextStep(3500);
+        return;
+      }
+
+      // 5. Idle / Scanning
+      setHUDStep("Scanning for questions or video...");
+      scheduleNextStep(3000);
+
+    } catch (err) {
+      console.error("[Auto-Pilot Error]", err);
+      setHUDStep(`Error: ${err.message}. Retrying...`);
+      scheduleNextStep(4000);
+    }
+  }
+
+  /**
+   * Handle video playing, speed up, and auto-next
+   */
+  function handleVideoAutoPilot(video) {
+    // Speed up video
+    try {
+      if (video.playbackRate !== autoPilotVideoSpeed) {
+        video.playbackRate = autoPilotVideoSpeed;
+      }
+    } catch (_) {}
+
+    // Auto-play if paused
+    if (video.paused && !video.ended) {
+      video.play().catch(() => {});
+    }
+
+    if (video.ended || (video.duration && video.currentTime >= video.duration - 1)) {
+      setHUDStep("Video finished! Advancing to next lesson...");
+      showStatus("🎬 Video finished! Looking for Next...", "success", 2500);
+      setTimeout(() => {
+        const clicked = clickNextOrSubmitButton();
+        if (!clicked) {
+          findAndClickNextLessonLink();
+        }
+        scheduleNextStep(3500);
+      }, 1500);
+    } else {
+      const remainingSec = Math.round(video.duration ? (video.duration - video.currentTime) / (video.playbackRate || 1) : 0);
+      const timeStr = remainingSec > 0 ? `${remainingSec}s left` : "Playing";
+      setHUDStep(`Watching video at ${video.playbackRate || 1}x (${timeStr})...`);
+      scheduleNextStep(2000);
+    }
+  }
+
+  /**
+   * Check if an MCQ is already checked / answered
+   */
+  function isQuestionAnswered(question) {
+    if (!question || !question.options) return false;
+    return question.options.some(opt => {
+      if (!opt.element) return false;
+      if (opt.element.tagName === "INPUT") return opt.element.checked;
+      if (opt.element.getAttribute("aria-checked") === "true") return true;
+      if (opt.element.classList.contains("selected") || opt.element.classList.contains("active") || opt.element.classList.contains("amcq-selected")) return true;
+      return false;
+    });
+  }
+
+  // ---- Next / Submit Button Detection & Clicking ----
+
+  /**
+   * Comprehensive Next/Submit button finder
+   */
+  function findNextOrSubmitButton() {
+    // Priority patterns for button labels
+    const targetTexts = [
+      /^next$/i,
+      /^next\s*question$/i,
+      /^next\s*lesson$/i,
+      /^next\s*topic$/i,
+      /^next\s*activity$/i,
+      /^submit$/i,
+      /^submit\s*answer$/i,
+      /^submit\s*quiz$/i,
+      /^check$/i,
+      /^check\s*answer$/i,
+      /^continue$/i,
+      /^complete\s*(&|and)?\s*continue$/i,
+      /^finish$/i,
+      /^finish\s*attempt$/i,
+      /^proceed$/i,
+      /^save\s*(&|and)?\s*next$/i
+    ];
+
+    // 1. Search button / a / div role="button" elements
+    const candidates = document.querySelectorAll(
+      'button, input[type="button"], input[type="submit"], a.btn, a[role="button"], div[role="button"], span[role="button"], .btn'
+    );
+
+    // Exact or strong regex matches first
+    for (const pattern of targetTexts) {
+      for (const el of candidates) {
+        if (!isElementVisible(el)) continue;
+        if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+        const text = (el.innerText || el.textContent || el.value || "").trim();
+        if (pattern.test(text)) {
+          return el;
+        }
+      }
+    }
+
+    // 2. Partial text matches
+    for (const el of candidates) {
+      if (!isElementVisible(el)) continue;
+      if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+      const text = (el.innerText || el.textContent || el.value || "").trim().toLowerCase();
+
+      // Avoid false positives like "Back", "Previous", "Cancel", "View All"
+      if (text.includes("previous") || text.includes("back") || text.includes("cancel") || text.includes("all questions")) {
+        continue;
+      }
+
+      if (text.includes("next") || text.includes("submit") || text.includes("continue")) {
+        return el;
+      }
+    }
+
+    // 3. Search by classes and data attributes
+    const attrSelectors = [
+      '[data-testid*="next" i]',
+      '[data-testid*="submit" i]',
+      '[aria-label*="next" i]',
+      '[title*="next" i]',
+      '.next-btn',
+      '.btn-next',
+      '.submit-btn',
+      '.btn-submit',
+      '.quiz-next',
+      '.course-next'
+    ];
+    for (const sel of attrSelectors) {
+      const match = document.querySelector(sel);
+      if (match && isElementVisible(match) && !match.disabled) {
+        return match;
+      }
+    }
+
+    return null;
+  }
+
+  function clickNextOrSubmitButton() {
+    const btn = findNextOrSubmitButton();
+    if (btn) {
+      humanClick(btn);
+      return true;
+    }
+    return false;
+  }
+
+  function manualClickNext() {
+    const btn = findNextOrSubmitButton();
+    if (btn) {
+      humanClick(btn);
+      showStatus("Clicked Next / Submit!", "success");
+    } else {
+      showStatus("No Next or Submit button detected.", "error");
+    }
+  }
+
+  /**
+   * Find syllabus / playlist next lesson link if on video/summary screen
+   */
+  function findAndClickNextLessonLink() {
+    // Look for active item in course syllabus / playlist and click next sibling
+    const activeItems = document.querySelectorAll(
+      '.active, .current, [aria-selected="true"], [data-active="true"]'
+    );
+    for (const item of activeItems) {
+      const parent = item.closest("li, div");
+      const nextSibling = parent?.nextElementSibling;
+      if (nextSibling) {
+        const link = nextSibling.querySelector("a, button, [role='button']") || nextSibling;
+        if (isElementVisible(link)) {
+          humanClick(link);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function humanClick(el) {
+    if (!el) return;
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (_) {}
+
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.click();
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  }
+
+  function isElementVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+      return false;
+    }
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
   }
 
   // ---- Question Extraction Engine ----
 
-  /**
-   * Main extraction function - tries multiple strategies to find MCQs
-   */
   function extractQuestions() {
     let questions = [];
 
@@ -84,7 +454,7 @@
     questions = extractFromInputGroups();
     if (questions.length > 0) return questions;
 
-    // Strategy 3: Look for labeled question blocks (common in LMS)
+    // Strategy 3: Look for labeled question blocks (GUVI, Moodle, Canvas, etc.)
     questions = extractFromQuestionBlocks();
     if (questions.length > 0) return questions;
 
@@ -93,15 +463,11 @@
     return questions;
   }
 
-  /**
-   * Strategy 1: Extract from <form> elements with radio/checkbox inputs
-   */
   function extractFromForms() {
     const questions = [];
     const forms = document.querySelectorAll("form");
 
     forms.forEach(form => {
-      // Find groups of inputs with the same name (each group = 1 question)
       const inputNames = new Set();
       form.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(input => {
         if (input.name) inputNames.add(input.name);
@@ -112,8 +478,6 @@
         if (inputs.length < 2) return;
 
         const type = inputs[0].type === "checkbox" ? "multi-choice" : "single-choice";
-
-        // Find the question text - look for preceding label, heading, or text
         const questionText = findQuestionText(inputs[0]);
 
         const options = [];
@@ -135,9 +499,6 @@
     return questions;
   }
 
-  /**
-   * Strategy 2: Extract from any radio/checkbox input groups (not in forms)
-   */
   function extractFromInputGroups() {
     const questions = [];
     const allInputs = document.querySelectorAll('input[type="radio"], input[type="checkbox"]');
@@ -170,42 +531,32 @@
     return questions;
   }
 
-  /**
-   * Strategy 3: Look for common LMS question block patterns
-   * (e.g., div.question, div.quiz-item, li.question-item, etc.)
-   */
   function extractFromQuestionBlocks() {
     const questions = [];
     const selectors = [
       ".question", ".quiz-question", ".question-item", ".quiz-item",
       "[class*='question']", "[class*='quiz']", "[data-question]",
       ".assessment-item", ".test-question", ".exam-question",
-      // Common LMS selectors
       ".formulation", ".qtext", ".answer", ".que",
-      // Google Forms
       "[data-params]", ".freebirdFormviewerViewItemsItemItem",
-      // Moodle
       ".que.multichoice", ".que.truefalse",
-      // Canvas LMS
       ".question_holder", ".display_question",
-      // Coursera / edX
-      ".rc-Option", "[data-testid*='question']"
+      ".rc-Option", "[data-testid*='question']",
+      // GUVI specific containers
+      ".quiz-content", ".question-wrapper", "[class*='CoursePlayer']", "[class*='quiz']"
     ];
 
     const questionContainers = document.querySelectorAll(selectors.join(", "));
 
     questionContainers.forEach(container => {
-      // Skip if too small (likely not a question)
       if (container.textContent.trim().length < 10) return;
 
-      // Find the question text within
       const qTextEl = container.querySelector(
-        ".qtext, .question-text, .stem, h3, h4, p, [class*='question-text'], [class*='stem']"
+        ".qtext, .question-text, .stem, h1, h2, h3, h4, p, [class*='question-text'], [class*='stem']"
       ) || container;
 
       const questionText = qTextEl.textContent.trim().split("\n")[0].trim();
 
-      // Find options
       const optionElements = container.querySelectorAll(
         'input[type="radio"], input[type="checkbox"], .option, .choice, .answer-option, ' +
         '[class*="option"], [class*="choice"], [role="radio"], [role="checkbox"], ' +
@@ -229,7 +580,6 @@
           text = el.textContent.trim();
         }
 
-        // De-duplicate
         if (text && !seenText.has(text) && text.length > 0 && text.length < 500) {
           seenText.add(text);
           options.push({ text, element: el, value: el.value || text });
@@ -244,13 +594,8 @@
     return questions;
   }
 
-  /**
-   * Strategy 4: Heuristic extraction - look for numbered question patterns
-   */
   function extractFromHeuristics() {
     const questions = [];
-
-    // Look for elements that look like questions (numbered, ending with ?)
     const allElements = document.querySelectorAll("p, div, span, li, h3, h4, h5, td");
     const questionPattern = /^(?:Q?\d+[\.\):]?\s*|Question\s*\d*[\.\):]?\s*)/i;
 
@@ -259,7 +604,6 @@
       if (text.length < 15 || text.length > 1000) return;
       if (!questionPattern.test(text) && !text.includes("?")) return;
 
-      // Check if this element has nearby radio/checkbox options
       const parent = el.parentElement;
       if (!parent) return;
 
@@ -288,27 +632,18 @@
     return questions;
   }
 
-  // ---- Helper functions ----
-
-  /**
-   * Find the question text for a given input element
-   */
   function findQuestionText(inputEl) {
-    // 1. Check for aria-label
     const ariaLabel = inputEl.closest("[aria-label]");
     if (ariaLabel) return ariaLabel.getAttribute("aria-label");
 
-    // 2. Walk up to find a question container
     let parent = inputEl.parentElement;
     for (let i = 0; i < 8 && parent; i++) {
-      // Look for a heading or question text element before the inputs
       const heading = parent.querySelector("h1, h2, h3, h4, h5, h6, .qtext, .question-text, p");
       if (heading && heading.compareDocumentPosition(inputEl) & Node.DOCUMENT_POSITION_FOLLOWING) {
         const text = heading.textContent.trim();
         if (text.length > 5 && text.length < 1000) return text;
       }
 
-      // Check if the parent has relevant class names
       if (parent.className && /question|quiz|item/i.test(parent.className)) {
         const textNodes = [];
         for (const child of parent.childNodes) {
@@ -322,7 +657,6 @@
       parent = parent.parentElement;
     }
 
-    // 3. Check preceding siblings
     let sibling = inputEl.parentElement?.previousElementSibling;
     for (let i = 0; i < 5 && sibling; i++) {
       const text = sibling.textContent.trim();
@@ -333,33 +667,25 @@
     return null;
   }
 
-  /**
-   * Find the label text for an input element
-   */
   function findLabelForInput(input) {
-    // 1. Check for <label for="...">
     if (input.id) {
       const label = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
       if (label) return label.textContent.trim();
     }
 
-    // 2. Check parent <label>
     const parentLabel = input.closest("label");
     if (parentLabel) {
-      // Get text content excluding the input itself
       const clone = parentLabel.cloneNode(true);
       clone.querySelectorAll("input").forEach(i => i.remove());
       return clone.textContent.trim();
     }
 
-    // 3. Check next sibling
     let nextEl = input.nextElementSibling;
     if (nextEl) {
       const text = nextEl.textContent.trim();
       if (text.length > 0 && text.length < 500) return text;
     }
 
-    // 4. Check adjacent text nodes
     const nextText = input.nextSibling;
     if (nextText && nextText.nodeType === Node.TEXT_NODE) {
       return nextText.textContent.trim();
@@ -368,15 +694,9 @@
     return input.value || "";
   }
 
-  // ---- Video Context Extraction ----
-
-  /**
-   * Extract video transcript/subtitles from the page
-   */
   function extractVideoTranscript() {
     let transcript = "";
 
-    // 1. Look for HTML5 <track> elements (subtitles/captions)
     const videos = document.querySelectorAll("video");
     videos.forEach(video => {
       const tracks = video.querySelectorAll("track");
@@ -390,15 +710,11 @@
       });
     });
 
-    // 2. Look for transcript containers (common in LMS platforms)
     const transcriptSelectors = [
       ".transcript", ".video-transcript", ".caption-text", ".subtitle-text",
       "[class*='transcript']", "[class*='caption']", "[class*='subtitle']",
-      ".rc-Transcript", // Coursera
-      ".video-transcript-body", // edX
-      "#transcript-container",
-      ".ytd-transcript-renderer", // YouTube
-      "[data-purpose='transcript-cue-container']" // Udemy
+      ".rc-Transcript", ".video-transcript-body", "#transcript-container",
+      ".ytd-transcript-renderer", "[data-purpose='transcript-cue-container']"
     ];
 
     const transcriptEls = document.querySelectorAll(transcriptSelectors.join(", "));
@@ -406,7 +722,6 @@
       transcript += el.textContent.trim() + "\n";
     });
 
-    // 3. Look for any visible text that might be a transcript/description
     const descSelectors = [
       ".video-description", ".lesson-content", ".lecture-content",
       ".course-content", "[class*='description']", "[class*='lesson']"
@@ -422,11 +737,8 @@
     return transcript.trim();
   }
 
-  // ---- Core Actions ----
+  // ---- Solving & Applying Answers ----
 
-  /**
-   * Main action: Extract questions, get video context, send to AI, apply answers
-   */
   async function startSolving() {
     if (isProcessing) {
       showStatus("Already processing...", "info");
@@ -435,33 +747,24 @@
     isProcessing = true;
 
     try {
-      showStatus("🔍 Extracting questions from page...", "info");
+      showStatus("🔍 Extracting questions...", "info");
       const questions = extractQuestions();
 
       if (questions.length === 0) {
-        showStatus("❌ No questions found on this page. Try 'Extract Only' to debug.", "error");
+        showStatus("❌ No questions found on this page.", "error");
         isProcessing = false;
         return;
       }
 
-      showStatus(`📝 Found ${questions.length} question(s). Extracting video context...`, "info");
-
-      // Get video context
+      showStatus(`📝 Found ${questions.length} question(s). Extracting context...`, "info");
       const videoContext = extractVideoTranscript();
-      if (videoContext) {
-        showStatus(`🎬 Found video context (${videoContext.length} chars). Sending to AI...`, "info");
-      } else {
-        showStatus(`🧠 No video context found. Sending ${questions.length} question(s) to AI...`, "info");
-      }
 
-      // Prepare questions data for API
       const questionsData = questions.map(q => ({
         questionText: q.questionText,
         options: q.options.map(o => ({ text: o.text })),
         type: q.type
       }));
 
-      // Send to background script for AI processing
       const response = await chrome.runtime.sendMessage({
         action: "solveQuestions",
         data: { questions: questionsData, videoContext }
@@ -473,11 +776,9 @@
         return;
       }
 
-      // Apply answers
-      showStatus("✅ Got answers! Applying...", "info");
+      showStatus("✅ Applying AI answers...", "info");
       applyAnswers(questions, response.answers);
-
-      showStatus(`✅ Done! Solved ${questions.length} question(s).`, "success");
+      showStatus(`✅ Solved ${questions.length} question(s)!`, "success");
 
     } catch (err) {
       showStatus(`❌ Error: ${err.message}`, "error");
@@ -487,9 +788,6 @@
     isProcessing = false;
   }
 
-  /**
-   * Apply AI answers to the page
-   */
   function applyAnswers(questions, answers) {
     answers.forEach(answer => {
       const qIdx = answer.questionIndex;
@@ -502,110 +800,98 @@
         if (optIdx < 0 || optIdx >= question.options.length) return;
         const option = question.options[optIdx];
 
-        // Click/select the option
         if (option.element) {
           const el = option.element;
-
           if (el.tagName === "INPUT") {
-            // Radio or checkbox
             el.checked = true;
             el.dispatchEvent(new Event("change", { bubbles: true }));
             el.dispatchEvent(new Event("input", { bubbles: true }));
             el.click();
           } else if (el.getAttribute("role") === "radio" || el.getAttribute("role") === "checkbox") {
-            // ARIA role-based
             el.click();
             el.setAttribute("aria-checked", "true");
           } else {
-            // Generic clickable element
             el.click();
           }
 
-          // Visual feedback - highlight selected answer
           el.closest("label, .option, .choice, .answer-option, li, div")
             ?.classList.add("amcq-selected");
         }
       });
-
-      // Log reasoning
-      console.log(
-        `Q${qIdx + 1}: ${question.questionText.substring(0, 60)}...`,
-        `\nAnswer: ${selectedOptions.map(i => question.options[i]?.text).join(", ")}`,
-        `\nConfidence: ${answer.confidence}`,
-        `\nReasoning: ${answer.reasoning}`
-      );
     });
   }
 
-  /**
-   * Extract and display questions (debug mode)
-   */
   function extractAndShow() {
     const questions = extractQuestions();
-
     if (questions.length === 0) {
-      showStatus("❌ No questions found. The page may use an unsupported format.", "error");
-      console.log("Auto MCQ Solver: No questions detected. Page HTML structure may not match known patterns.");
+      showStatus("❌ No questions found. Page may use custom components.", "error");
       return;
     }
-
-    console.log("=== Auto MCQ Solver: Extracted Questions ===");
-    questions.forEach((q, i) => {
-      console.log(`\nQ${i + 1}: ${q.questionText}`);
-      console.log(`Type: ${q.type}`);
-      q.options.forEach((opt, j) => {
-        console.log(`  ${String.fromCharCode(65 + j)}) ${opt.text}`);
-      });
-    });
-
-    showStatus(`📋 Found ${questions.length} question(s). Check browser console (F12) for details.`, "success");
+    console.log("=== Extracted Questions ===", questions);
+    showStatus(`📋 Found ${questions.length} question(s). Check F12 console.`, "success");
   }
 
-  /**
-   * Extract and display video context
-   */
   function extractVideoContext() {
     const transcript = extractVideoTranscript();
-
     if (!transcript) {
-      showStatus("🎬 No video transcript/subtitles found on this page.", "error");
+      showStatus("🎬 No video transcript found.", "error");
       return;
     }
-
-    console.log("=== Auto MCQ Solver: Video Context ===");
-    console.log(transcript);
-
-    showStatus(`🎬 Found transcript (${transcript.length} chars). Check console (F12).`, "success");
+    console.log("=== Video Transcript ===", transcript);
+    showStatus(`🎬 Found transcript (${transcript.length} chars).`, "success");
   }
 
-  // ---- Listen for messages from popup ----
+  // ---- SPA URL & Navigation Watcher ----
+  let lastUrl = location.href;
+  new MutationObserver(() => {
+    const url = location.href;
+    if (url !== lastUrl) {
+      lastUrl = url;
+      console.log("[Auto MCQ] Page/URL changed:", url);
+      if (autoPilotEnabled) {
+        setHUDStep("Page changed. Scanning in 2s...");
+        scheduleNextStep(2000);
+      }
+    }
+  }).observe(document, { subtree: true, childList: true });
+
+  // ---- Message Listener ----
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "triggerSolve") {
       startSolving().then(() => sendResponse({ done: true }));
       return true;
     }
-    if (request.action === "triggerExtract") {
-      extractAndShow();
+    if (request.action === "triggerNext") {
+      manualClickNext();
       sendResponse({ done: true });
     }
-    if (request.action === "triggerVideoContext") {
-      extractVideoContext();
-      sendResponse({ done: true });
+    if (request.action === "setAutoPilot") {
+      setAutoPilot(request.enabled);
+      if (request.speed) autoPilotVideoSpeed = parseFloat(request.speed);
+      sendResponse({ autoPilotEnabled });
     }
     if (request.action === "getPageInfo") {
       const questions = extractQuestions();
       const transcript = extractVideoTranscript();
+      const hasVideo = !!document.querySelector("video");
+      const nextBtn = findNextOrSubmitButton();
+
       sendResponse({
         questionCount: questions.length,
         hasTranscript: transcript.length > 0,
         transcriptLength: transcript.length,
+        hasVideo,
+        hasNextButton: !!nextBtn,
+        nextButtonText: nextBtn ? (nextBtn.textContent || "").trim() : null,
+        autoPilotEnabled,
+        autoPilotVideoSpeed,
         url: window.location.href,
         title: document.title
       });
     }
   });
 
-  // ---- Initialize ----
+  // ---- Initialize UI ----
   createFloatingUI();
-  console.log("Auto MCQ Solver: Content script loaded on", window.location.href);
+  console.log("Auto MCQ Solver & Auto-Pilot loaded on", window.location.href);
 })();
