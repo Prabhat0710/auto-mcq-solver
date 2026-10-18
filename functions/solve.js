@@ -5,7 +5,7 @@
 
 const GEMINI_MODELS = [
   "gemini-3.8-flash",
-  "gemini-3.8-flash-lite"
+  "gemini-2.5-flash"
 ];
 
 const CORS_HEADERS = {
@@ -22,7 +22,7 @@ export async function onRequestPost(context) {
   const { request, env } = context;
 
   // Verify secret is configured
-  const apiKey = env.GEMINI_API_KEY;
+  const apiKey = (env.GEMINI_API_KEY || "").trim();
   if (!apiKey) {
     return new Response(
       JSON.stringify({
@@ -76,20 +76,23 @@ Response format (strict JSON array):
     });
 
     let responseText = null;
-    let lastError = null;
+    const errors = [];
 
     for (const model of GEMINI_MODELS) {
-      try {
-        responseText = await callGemini(apiKey, model, prompt, systemPrompt);
-        if (responseText) break;
-      } catch (err) {
-        lastError = err;
-        console.warn(`[Pages Function] Model ${model} failed: ${err.message}`);
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          responseText = await callGemini(apiKey, model, prompt, systemPrompt);
+          if (responseText) break;
+        } catch (err) {
+          errors.push(`[${model} attempt ${attempt}]: ${err.message}`);
+          await new Promise(r => setTimeout(r, 1000));
+        }
       }
+      if (responseText) break;
     }
 
     if (!responseText) {
-      throw new Error(lastError ? lastError.message : "All Gemini models failed.");
+      throw new Error(`All Gemini models failed: ${errors.join(" | ")}`);
     }
 
     let answers;
@@ -100,7 +103,7 @@ Response format (strict JSON array):
       if (jsonMatch) {
         answers = JSON.parse(jsonMatch[0]);
       } else {
-        throw new Error("Invalid AI JSON response format.");
+        throw new Error("Invalid AI JSON response format: " + responseText.substring(0, 150));
       }
     }
 
@@ -135,7 +138,7 @@ async function callGemini(apiKey, model, prompt, systemInstruction) {
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Gemini error (${res.status}): ${errorText}`);
+    throw new Error(`(${res.status}): ${errorText}`);
   }
 
   const json = await res.json();
