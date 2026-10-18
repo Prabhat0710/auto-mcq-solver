@@ -1,0 +1,6 @@
+name = "auto-mcq-solver-proxy"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Environment variables
+# Use `wrangler secret put GEMINI_API_KEY` to set your Gemini API key securely.

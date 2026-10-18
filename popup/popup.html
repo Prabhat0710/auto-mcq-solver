@@ -22,6 +22,12 @@
       </div>
     </div>
 
+    <!-- Active Backend Badge -->
+    <div id="backendBadge" class="backend-badge">
+      <span class="badge-dot"></span>
+      <span id="backendBadgeText">Checking AI connection...</span>
+    </div>
+
     <!-- Auto-Pilot Control Card -->
     <div class="autopilot-card">
       <div class="autopilot-header">
@@ -51,24 +57,20 @@
       </div>
     </div>
 
-    <!-- API Key Section -->
+    <!-- Manual Actions -->
     <div class="section">
-      <label class="label">Gemini API Key</label>
-      <div class="input-group">
-        <input type="password" id="apiKey" placeholder="Enter your Gemini API key..." />
-        <button id="toggleKey" class="btn-icon" title="Show/Hide">👁️</button>
+      <label class="label">Quick Actions</label>
+      <button id="solveBtn" class="btn btn-primary btn-full btn-large">
+        🧠 Solve Current Questions
+      </button>
+      <button id="nextBtn" class="btn btn-secondary btn-full" style="margin-bottom: 8px;">
+        ➡️ Click Next / Submit
+      </button>
+      <div class="btn-row">
+        <button id="extractBtn" class="btn btn-secondary">📋 Extract</button>
+        <button id="videoBtn" class="btn btn-secondary">🎬 Transcript</button>
       </div>
-      <div class="input-actions">
-        <button id="saveKey" class="btn btn-primary">Save Key</button>
-        <button id="testKey" class="btn btn-secondary">Test</button>
-      </div>
-      <div id="keyStatus" class="status-msg" style="display:none;"></div>
-      <a href="https://aistudio.google.com/apikey" target="_blank" class="help-link">
-        🔑 Get free API key from Google AI Studio
-      </a>
     </div>
-
-    <hr class="divider">
 
     <!-- Page Info -->
     <div class="section">
@@ -96,20 +98,42 @@
 
     <hr class="divider">
 
-    <!-- Manual Actions -->
-    <div class="section">
-      <label class="label">Manual Actions</label>
-      <button id="solveBtn" class="btn btn-primary btn-full btn-large">
-        🧠 Solve Current Questions
-      </button>
-      <button id="nextBtn" class="btn btn-secondary btn-full" style="margin-bottom: 8px;">
-        ➡️ Click Next / Submit
-      </button>
-      <div class="btn-row">
-        <button id="extractBtn" class="btn btn-secondary">📋 Extract</button>
-        <button id="videoBtn" class="btn btn-secondary">🎬 Transcript</button>
+    <!-- Collapsible Settings Section -->
+    <details class="settings-details">
+      <summary class="settings-summary">⚙️ AI Backend Settings</summary>
+      
+      <div class="settings-body">
+        <!-- Cloudflare Proxy Setup -->
+        <div class="setting-block">
+          <label class="label">Cloudflare Worker Proxy (No Key Needed)</label>
+          <div class="input-group">
+            <input type="text" id="proxyUrl" placeholder="https://auto-mcq.<subdomain>.workers.dev" />
+          </div>
+          <div class="input-actions">
+            <button id="saveProxy" class="btn btn-primary">Save Proxy</button>
+            <button id="testProxy" class="btn btn-secondary">Test</button>
+          </div>
+          <div id="proxyStatus" class="status-msg" style="display:none;"></div>
+        </div>
+
+        <!-- Custom Gemini API Key -->
+        <div class="setting-block" style="margin-top: 12px;">
+          <label class="label">OR Custom Gemini API Key</label>
+          <div class="input-group">
+            <input type="password" id="apiKey" placeholder="Enter custom Gemini API key..." />
+            <button id="toggleKey" class="btn-icon" title="Show/Hide">👁️</button>
+          </div>
+          <div class="input-actions">
+            <button id="saveKey" class="btn btn-primary">Save Key</button>
+            <button id="testKey" class="btn btn-secondary">Test</button>
+          </div>
+          <div id="keyStatus" class="status-msg" style="display:none;"></div>
+          <a href="https://aistudio.google.com/apikey" target="_blank" class="help-link">
+            🔑 Get free API key from Google AI Studio
+          </a>
+        </div>
       </div>
-    </div>
+    </details>
 
     <!-- Footer -->
     <div class="footer">
