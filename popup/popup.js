@@ -51,11 +51,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   );
 
+  const DEFAULT_PROXY_URL = "https://auto-mcq-solver.pages.dev";
+
   function updateBackendBadge(proxyUrl, apiKey) {
+    const effectiveProxy = (proxyUrl && proxyUrl.trim()) || DEFAULT_PROXY_URL;
     if (apiKey && apiKey.trim()) {
       backendBadge.className = "backend-badge badge-online";
       backendBadgeText.textContent = "🔑 Using Custom Gemini Key";
-    } else if (proxyUrl && proxyUrl.trim()) {
+    } else if (effectiveProxy) {
       backendBadge.className = "backend-badge badge-online";
       backendBadgeText.textContent = "⚡ Cloudflare Proxy Active (Keyless)";
     } else {

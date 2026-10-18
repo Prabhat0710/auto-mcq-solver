@@ -11,6 +11,7 @@
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
     "https://*.workers.dev/*",
+    "https://*.pages.dev/*",
     "<all_urls>"
   ],
   "action": {

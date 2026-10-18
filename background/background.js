@@ -2,8 +2,8 @@
 // Background Service Worker - Gemini Direct & Cloudflare Proxy
 // ============================================================
 
-// Optional default Cloudflare Worker URL (e.g. "https://auto-mcq-solver.your-subdomain.workers.dev")
-const DEFAULT_PROXY_URL = ""; 
+// Pre-configured Cloudflare Pages Proxy URL (No API key needed for users!)
+const DEFAULT_PROXY_URL = "https://auto-mcq-solver.pages.dev"; 
 
 const GEMINI_MODELS = [
   "gemini-3.8-flash",      // Primary - fast & free
