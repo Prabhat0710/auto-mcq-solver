@@ -158,6 +158,14 @@
   max-width: 420px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   animation: amcq-slide-in 0.3s ease;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#amcq-status:hover {
+  opacity: 0.85;
+  transform: translateY(-2px);
 }
 
 @keyframes amcq-slide-in {

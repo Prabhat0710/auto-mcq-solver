@@ -19,6 +19,7 @@
 
   let floatingBtn = null;
   let statusPanel = null;
+  let statusTimer = null;
   let autoPilotHUD = null;
 
   // ---- Initialize from Storage ----
@@ -59,6 +60,14 @@
     statusPanel = document.createElement("div");
     statusPanel.id = "amcq-status";
     statusPanel.style.display = "none";
+    statusPanel.title = "Click to dismiss";
+    statusPanel.addEventListener("click", () => {
+      statusPanel.style.display = "none";
+      if (statusTimer) {
+        clearTimeout(statusTimer);
+        statusTimer = null;
+      }
+    });
     document.body.appendChild(statusPanel);
 
     // 3. Auto-Pilot Top HUD
@@ -100,13 +109,18 @@
     menu.style.display = menu.style.display === "none" ? "flex" : "none";
   }
 
-  function showStatus(msg, type = "info", duration = 4000) {
+  function showStatus(msg, type = "info", duration = 3000) {
+    if (statusTimer) {
+      clearTimeout(statusTimer);
+      statusTimer = null;
+    }
     statusPanel.style.display = "block";
     statusPanel.className = `amcq-status-${type}`;
     statusPanel.textContent = msg;
-    if (type === "success" || type === "error") {
-      setTimeout(() => { statusPanel.style.display = "none"; }, duration);
-    }
+    statusTimer = setTimeout(() => {
+      statusPanel.style.display = "none";
+      statusTimer = null;
+    }, duration);
   }
 
   function setHUDStep(text) {
