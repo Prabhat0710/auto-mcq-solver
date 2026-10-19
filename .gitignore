@@ -25,3 +25,6 @@ desktop.ini
 *.crx
 *.pem
 *.zip
+
+# Agent internal files
+.agents/

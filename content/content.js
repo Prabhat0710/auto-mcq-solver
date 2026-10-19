@@ -16,6 +16,7 @@
   let autoPilotTimer = null;
   let consecutiveStallCount = 0;
   let lastProcessedSignature = "";
+  let activeCorrectionTarget = null;
 
   let floatingBtn = null;
   let statusPanel = null;
@@ -178,17 +179,47 @@
   }
 
   /**
-   * Main Autonomous Decision Loop
+   * Main Autonomous Decision Loop with Intelligent Error Recovery
    */
   async function autoPilotStep() {
     if (!autoPilotEnabled) return;
 
     try {
-      // 1. Check if there are unanswered MCQs on screen
-      const questions = extractQuestions();
-      const hasUnanswered = questions.some(q => !isQuestionAnswered(q));
+      // 0. Check for review drawer or list showing wrong/unattended questions
+      const problemItem = findProblemQuestionInDrawerOrList();
 
-      if (questions.length > 0 && hasUnanswered) {
+      // If a problem question is visible in the drawer and it's NOT the currently active question:
+      if (problemItem && !problemItem.isActive) {
+        setHUDStep(`⚠️ Found ${problemItem.type}: '${problemItem.text}'. Navigating back to fix...`);
+        showStatus(`⚠️ Navigating to fix ${problemItem.text}...`, "info", 2500);
+        activeCorrectionTarget = {
+          type: problemItem.type,
+          questionNumber: problemItem.questionNumber,
+          text: problemItem.text,
+          timestamp: Date.now()
+        };
+        humanClick(problemItem.element);
+        scheduleNextStep(2000);
+        return;
+      }
+
+      // 1. Check if there are questions on screen
+      const questions = extractQuestions();
+      
+      // A question needs solving if:
+      // a) It is unanswered, OR
+      // b) It was marked wrong / has wrong options, OR
+      // c) We actively navigated here via activeCorrectionTarget to fix a wrong question, OR
+      // d) The problem item in the drawer points to this active question as wrong
+      const needsSolving = questions.filter(q => {
+        if (!isQuestionAnswered(q)) return true;
+        if (isQuestionWrong(q)) return true;
+        if (activeCorrectionTarget && activeCorrectionTarget.type === "wrong") return true;
+        if (problemItem && problemItem.type === "wrong") return true;
+        return false;
+      });
+
+      if (questions.length > 0 && needsSolving.length > 0) {
         const sig = "mcq_" + questions.map(q => q.questionText.substring(0, 30)).join("|");
         if (sig === lastProcessedSignature) {
           consecutiveStallCount++;
@@ -202,13 +233,15 @@
           lastProcessedSignature = sig;
         }
 
-        setHUDStep(`Solving ${questions.length} MCQ(s)...`);
-        showStatus(`🧠 Auto-Pilot: Solving ${questions.length} question(s)...`, "info");
+        const isFixing = questions.some(q => isQuestionWrong(q) || (problemItem && problemItem.type === "wrong") || (activeCorrectionTarget && activeCorrectionTarget.type === "wrong"));
+        setHUDStep(isFixing ? `Correcting wrong answer for ${questions.length} MCQ...` : `Solving ${questions.length} MCQ(s)...`);
+        showStatus(isFixing ? `🧠 Auto-Pilot: Fixing wrong answer...` : `🧠 Auto-Pilot: Solving ${questions.length} question(s)...`, "info");
         
-        await startSolving();
+        await startSolving(isFixing);
+        activeCorrectionTarget = null; // Clear target after re-solving
 
         // After solving, wait for DOM update, then click Next/Submit
-        setHUDStep("Answers selected. Clicking Next...");
+        setHUDStep("Answer selected. Clicking Next...");
         await sleep(1500);
         const clicked = clickNextOrSubmitButton();
         if (clicked) {
@@ -218,15 +251,49 @@
         return;
       }
 
-      // 2. If questions exist and are ALREADY answered, advance to next question/lesson
-      if (questions.length > 0 && !hasUnanswered) {
+      // 2. If questions exist and are ALREADY answered without errors:
+      if (questions.length > 0 && needsSolving.length === 0) {
+        consecutiveStallCount++;
+
+        // If we clicked Next multiple times and the page didn't advance:
+        if (consecutiveStallCount >= 2) {
+          // Check if there is an inactive problem item we can jump to
+          if (problemItem) {
+            setHUDStep(`Stalled. Jumping to ${problemItem.text}...`);
+            humanClick(problemItem.element);
+            consecutiveStallCount = 0;
+            scheduleNextStep(2000);
+            return;
+          }
+
+          // Check if there is a retry button
+          const retryBtn = findRetryButton();
+          if (retryBtn) {
+            setHUDStep("Stalled. Clicking Retry...");
+            humanClick(retryBtn);
+            consecutiveStallCount = 0;
+            scheduleNextStep(2000);
+            return;
+          }
+
+          // Check if there is a previous button to step back and find earlier missed questions
+          const prevBtn = findPreviousButton();
+          if (prevBtn) {
+            setHUDStep("Stalled. Checking previous questions...");
+            humanClick(prevBtn);
+            consecutiveStallCount = 0;
+            scheduleNextStep(2000);
+            return;
+          }
+        }
+
         setHUDStep("Questions already answered. Advancing...");
         const clicked = clickNextOrSubmitButton();
         if (clicked) {
           showStatus("➡️ Advancing to next...", "info", 2000);
-          scheduleNextStep(3000);
-          return;
         }
+        scheduleNextStep(3000);
+        return;
       }
 
       // 3. Check for HTML5 Video
@@ -292,6 +359,159 @@
     }
   }
 
+  // ---- Error Recovery & Question Drawer Helpers ----
+
+  function isRedColor(colorStr) {
+    if (!colorStr) return false;
+    const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (match) {
+      const r = parseInt(match[1]);
+      const g = parseInt(match[2]);
+      const b = parseInt(match[3]);
+      return r > 180 && g < 110 && b < 110;
+    }
+    return /red|crimson|firebrick/i.test(colorStr);
+  }
+
+  function findWrongOptionsForQuestion(question) {
+    const wrong = [];
+    if (!question || !question.options) return wrong;
+
+    question.options.forEach(opt => {
+      if (!opt.element) return;
+      const el = opt.element.closest("label, .option, .choice, .answer-option, li, div") || opt.element;
+      if (!el) return;
+
+      const className = ((el.className || "") + " " + (opt.element.className || "")).toLowerCase();
+      if (/\b(wrong|incorrect|danger|error|bad|is-invalid)\b/.test(className)) {
+        wrong.push(opt.text);
+        return;
+      }
+
+      // Check if option was selected
+      const isSelected = (opt.element.tagName === "INPUT" && opt.element.checked) ||
+                         opt.element.getAttribute("aria-checked") === "true" ||
+                         opt.element.classList.contains("selected") ||
+                         opt.element.classList.contains("active") ||
+                         opt.element.classList.contains("amcq-selected") ||
+                         el.classList.contains("selected") ||
+                         el.classList.contains("active") ||
+                         el.classList.contains("amcq-selected");
+
+      if (isSelected) {
+        try {
+          const style = window.getComputedStyle(el);
+          const optStyle = window.getComputedStyle(opt.element);
+          if (isRedColor(style.backgroundColor) || isRedColor(style.color) || isRedColor(style.borderColor) ||
+              isRedColor(optStyle.backgroundColor) || isRedColor(optStyle.color) || isRedColor(optStyle.borderColor)) {
+            wrong.push(opt.text);
+            return;
+          }
+        } catch (_) {}
+
+        // If we actively navigated here to correct a wrong answer, the currently selected option was the wrong one!
+        if (activeCorrectionTarget && activeCorrectionTarget.type === "wrong") {
+          wrong.push(opt.text);
+          return;
+        }
+      }
+    });
+
+    return Array.from(new Set(wrong));
+  }
+
+  function isQuestionWrong(question) {
+    if (activeCorrectionTarget && activeCorrectionTarget.type === "wrong") return true;
+    return findWrongOptionsForQuestion(question).length > 0;
+  }
+
+  function findProblemQuestionInDrawerOrList() {
+    // Look for items representing wrong or unattended questions in the sidebar/drawer
+    const candidates = Array.from(document.querySelectorAll(
+      'li, div, a, button, tr, [role="button"], [class*="item"], [class*="question"]'
+    ));
+
+    const problemItems = [];
+
+    for (const el of candidates) {
+      if (!isElementVisible(el)) continue;
+      if (el.children.length > 5) continue; // Skip large container blocks
+
+      const text = (el.innerText || el.textContent || "").trim();
+      if (!text) continue;
+
+      const isWrong = /\bwrong\b/i.test(text) || /\bincorrect\b/i.test(text);
+      const isUnattended = /not\s*attended/i.test(text) || /\bunattended\b/i.test(text) || /\bunanswered\b/i.test(text) || /\bskipped\b/i.test(text);
+
+      if (isWrong || isUnattended) {
+        // Exclude general tab bars or headers like "Wrong Answers" or "All Questions" without a question number
+        const isTabHeader = /^(all\s*questions|unanswered|correct\s*answers?|wrong\s*answers?)$/i.test(text);
+        if (isTabHeader) continue;
+
+        const clickable = el.closest('li, button, a, [role="button"], tr') || el;
+        const numMatch = text.match(/(?:question\s*)?#?\b(\d+)\b/i);
+        const isActive = clickable.classList.contains("active") ||
+                         clickable.classList.contains("selected") ||
+                         clickable.getAttribute("aria-selected") === "true";
+
+        problemItems.push({
+          element: clickable,
+          type: isWrong ? "wrong" : "unattended",
+          text: text.substring(0, 35).replace(/\s+/g, " "),
+          hasNumber: !!numMatch,
+          questionNumber: numMatch ? numMatch[1] : null,
+          isActive
+        });
+      }
+    }
+
+    if (problemItems.length === 0) return null;
+
+    // 1st priority: Inactive question item with number (e.g. "1 Wrong Answer")
+    const numberedInactive = problemItems.find(item => item.hasNumber && !item.isActive);
+    if (numberedInactive) return numberedInactive;
+
+    // 2nd priority: Any inactive problem item
+    const anyInactive = problemItems.find(item => !item.isActive);
+    if (anyInactive) return anyInactive;
+
+    // 3rd priority: Numbered active item (if currently on it)
+    const numberedActive = problemItems.find(item => item.hasNumber);
+    if (numberedActive) return numberedActive;
+
+    return problemItems[0];
+  }
+
+  function findPreviousButton() {
+    const candidates = document.querySelectorAll(
+      'button, input[type="button"], a.btn, a[role="button"], div[role="button"], span[role="button"], .btn'
+    );
+    for (const el of candidates) {
+      if (!isElementVisible(el)) continue;
+      if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+      const text = (el.innerText || el.textContent || el.value || "").trim();
+      if (/^previous$/i.test(text) || /^prev$/i.test(text) || /^back$/i.test(text)) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function findRetryButton() {
+    const candidates = document.querySelectorAll(
+      'button, input[type="button"], a.btn, a[role="button"], div[role="button"], span[role="button"], .btn'
+    );
+    for (const el of candidates) {
+      if (!isElementVisible(el)) continue;
+      if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+      const text = (el.innerText || el.textContent || el.value || "").trim();
+      if (/^try\s*again$/i.test(text) || /^retry$/i.test(text) || /^retake$/i.test(text)) {
+        return el;
+      }
+    }
+    return null;
+  }
+
   /**
    * Check if an MCQ is already checked / answered
    */
@@ -299,9 +519,11 @@
     if (!question || !question.options) return false;
     return question.options.some(opt => {
       if (!opt.element) return false;
-      if (opt.element.tagName === "INPUT") return opt.element.checked;
+      if (opt.element.tagName === "INPUT" && opt.element.checked) return true;
       if (opt.element.getAttribute("aria-checked") === "true") return true;
       if (opt.element.classList.contains("selected") || opt.element.classList.contains("active") || opt.element.classList.contains("amcq-selected")) return true;
+      const wrapper = opt.element.closest("label, .option, .choice, .answer-option, li, div");
+      if (wrapper && (wrapper.classList.contains("selected") || wrapper.classList.contains("active") || wrapper.classList.contains("amcq-selected"))) return true;
       return false;
     });
   }
@@ -753,7 +975,7 @@
 
   // ---- Solving & Applying Answers ----
 
-  async function startSolving() {
+  async function startSolving(isCorrection = false) {
     if (isProcessing) {
       showStatus("Already processing...", "info");
       return;
@@ -761,7 +983,7 @@
     isProcessing = true;
 
     try {
-      showStatus("🔍 Extracting questions...", "info");
+      showStatus(isCorrection ? "🔍 Re-evaluating question to correct error..." : "🔍 Extracting questions...", "info");
       const questions = extractQuestions();
 
       if (questions.length === 0) {
@@ -773,11 +995,18 @@
       showStatus(`📝 Found ${questions.length} question(s). Extracting context...`, "info");
       const videoContext = extractVideoTranscript();
 
-      const questionsData = questions.map(q => ({
-        questionText: q.questionText,
-        options: q.options.map(o => ({ text: o.text })),
-        type: q.type
-      }));
+      const questionsData = questions.map(q => {
+        let text = q.questionText;
+        const wrongOpts = findWrongOptionsForQuestion(q);
+        if (wrongOpts.length > 0) {
+          text += ` [CRITICAL NOTE: The following choice(s) were previously selected and marked INCORRECT: "${wrongOpts.join('", "')}". Do NOT choose them! You MUST choose the correct answer from the other options.]`;
+        }
+        return {
+          questionText: text,
+          options: q.options.map(o => ({ text: o.text })),
+          type: q.type
+        };
+      });
 
       const response = await chrome.runtime.sendMessage({
         action: "solveQuestions",
@@ -810,6 +1039,14 @@
       const question = questions[qIdx];
       const selectedOptions = answer.selectedOptions || [0];
 
+      // Remove previous amcq-selected highlights from all options of this question
+      question.options.forEach(opt => {
+        if (opt.element) {
+          const wrapper = opt.element.closest("label, .option, .choice, .answer-option, li, div") || opt.element;
+          wrapper.classList.remove("amcq-selected");
+        }
+      });
+
       selectedOptions.forEach(optIdx => {
         if (optIdx < 0 || optIdx >= question.options.length) return;
         const option = question.options[optIdx];
@@ -828,8 +1065,8 @@
             el.click();
           }
 
-          el.closest("label, .option, .choice, .answer-option, li, div")
-            ?.classList.add("amcq-selected");
+          const wrapper = el.closest("label, .option, .choice, .answer-option, li, div") || el;
+          wrapper.classList.add("amcq-selected");
         }
       });
     });
