@@ -14,10 +14,12 @@
 
 - ⚡ **Zero-Config "Just Add and Use"**: Comes pre-configured with a live, high-speed Cloudflare proxy. Friends and classmates can install and start solving immediately without creating Google AI Studio accounts or generating API keys!
 - 🚀 **Full Auto-Pilot Mode**: Autonomously solves quizzes, selects the right answers, clicks **Submit / Next**, and advances to the next lesson or module automatically.
+- 🔄 **Intelligent Error Recovery & Self-Healing**: Detects when a question was answered incorrectly or skipped (via LMS review drawers, red badges, or submission blocks). Automatically navigates back to the failing question, blacklists previously wrong choices, prompts Gemini for the correct alternative, and advances!
 - 🎬 **Smart Video Fast-Forward**: Automatically detects video lectures, accelerates playback up to **16x** (**1x**, **2x**, **4x**, **8x**, **16x**), and auto-clicks "Next Lesson" the second the video completes.
 - 🎯 **Multi-Strategy Question Scraper**: 4 specialized detection strategies extract questions from `<form>` inputs, dynamic radio/checkbox elements, LMS wrappers, and heuristic numbered text.
 - 🧠 **Context-Aware Solving**: Extracts video transcripts, subtitles, and lesson descriptions on the fly, feeding lecture context to Gemini for near-100% quiz accuracy.
-- 🛡️ **Enterprise-Grade AI Pipeline**: Cloudflare serverless edge proxy automatically handles high server loads with retries, exponential backoff, and model fallbacks (`gemini-3.8-flash` & `gemini-2.5-flash`).
+- 🛡️ **Anti-Stall & Backtracking Engine**: If submission fails or stalls due to a missed question, Auto-Pilot detects the stall and automatically navigates backwards or uses retry options to resolve the block.
+- ⚡ **Enterprise-Grade AI Pipeline**: Cloudflare serverless edge proxy automatically handles high server loads with retries, exponential backoff, and model fallbacks (`gemini-3.8-flash` & `gemini-2.5-flash`).
 - 🔑 **Optional Custom Key Override**: Power users can still provide their own private Gemini API key inside the extension settings.
 - 🔒 **Privacy & Safety First**: Zero tracking, zero telemetry, and your Gemini API key is safely encrypted on Cloudflare edge servers.
 
@@ -103,6 +105,14 @@ Need to finish your coursework on a friend's laptop or college lab computer? It 
 2. Click **"🧠 Solve Current Questions"** to answer questions without automatically submitting.
 3. Review the highlighted answers and click submit whenever you're ready.
 
+### 🔄 Intelligent Self-Healing & Error Recovery
+Platforms like GUVI, Moodle, and Canvas block course progress if a question is skipped or answered incorrectly. Auto-Pilot resolves this completely hands-free:
+1. **LMS Drawer & Modal Detection**: When a platform halts submission and opens a summary panel (e.g., `1 Wrong Answer` or `1 Not Attended`), Auto-Pilot detects the failing item immediately.
+2. **Autonomous Backtracking**: Clicks directly on the drawer item (or steps backward using **Previous**) to return straight to the failing question.
+3. **Negative Constraint Blacklisting**: Detects previously selected wrong options or red error badges and sends a strict directive to Gemini:
+   > `[CRITICAL NOTE: Option "X" was previously selected and marked INCORRECT. Do NOT choose it! Select the correct answer from the other options.]`
+4. **Correction & Resume**: Gemini selects the correct alternative, Auto-Pilot unchecks the wrong choice, clicks the new answer, submits, and resumes course advancement!
+
 ---
 
 ## 🏗️ Architecture & How It Works
@@ -138,7 +148,7 @@ auto-mcq-solver/
 ├── background/
 │   └── background.js      # Service Worker: Handles Cloudflare proxy & direct API calls
 ├── content/
-│   ├── content.js         # Core Engine: Auto-Pilot loop, question scraping, video acceleration
+│   ├── content.js         # Core Engine: Auto-Pilot loop, question scraping, self-healing recovery, video acceleration
 │   └── content.css        # Styles: Floating action button, on-screen HUD, answer highlights
 ├── popup/
 │   ├── popup.html         # User Interface: Auto-Pilot toggle, speed selector, backend badge
@@ -172,6 +182,7 @@ If you want to deploy your own Cloudflare backend instead of using the pre-confi
 |---|---|
 | **"Cannot reach page"** | Refresh the course tab (press `F5`) so the content script can inject. |
 | **"No questions detected"** | Click **Refresh Page Scan** in the popup or ensure the quiz has fully rendered on screen. |
+| **Quiz blocked by wrong / skipped question** | Auto-Pilot automatically detects the review drawer (`1 Wrong Answer` / `1 Not Attended`), navigates back, blacklists the wrong choice, re-solves, and advances! |
 | **Video doesn't speed up** | Some platforms wrap videos in custom iframes. The extension will still monitor playback and advance when done. |
 | **Need personal quota** | Open **⚙️ AI Backend Settings** in the popup and enter your personal Gemini API key. |
 
