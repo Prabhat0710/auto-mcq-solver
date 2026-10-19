@@ -193,6 +193,10 @@ If you want to deploy your own Cloudflare backend instead of using the pre-confi
 - **Encrypted Secrets**: Your Gemini API key is never bundled in client code or pushed to Git; it lives strictly in encrypted Cloudflare server environment variables.
 - **Zero Data Collection**: We do not store, log, or track user browsing history, cookies, or course credentials.
 - **Direct Edge Routing**: Requests travel directly from your browser to Cloudflare and Google Gemini over TLS 1.3 encryption.
+- **Per-IP Rate Limiting**: The Cloudflare backend enforces a sliding-window rate limit (20 requests/min per IP) to prevent abuse and quota exhaustion.
+- **Scoped Permissions**: The extension only auto-injects on known LMS domains (GUVI, Moodle, Canvas, Coursera, etc.). For other sites, injection happens on-demand only when you open the popup (via `activeTab` + `scripting`).
+- **Input & Output Validation**: All request payloads are validated (question count caps, field-length limits, body-size limits). Gemini responses are schema-validated and sanitised on both server and client before any DOM interaction.
+- **Button Safety Denylist**: Auto-Pilot will **never** click destructive buttons like `Delete`, `Logout`, `Pay`, `Unenroll`, `Reset`, or other dangerous actions — a comprehensive denylist prevents false-positive clicks.
 
 ---
 
