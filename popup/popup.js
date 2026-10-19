@@ -211,7 +211,20 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   refreshInfoBtn.addEventListener("click", scanPage);
-  scanPage();
+
+  // On popup open: try to inject content script on unlisted sites (on-demand via activeTab)
+  (async () => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id && tab.url && tab.url.startsWith("http")) {
+        await chrome.runtime.sendMessage({ action: "injectContentScript", tabId: tab.id });
+      }
+    } catch (_) {
+      // Injection may fail if site doesn't allow — that's OK
+    }
+    // Small delay to let content script initialize before scanning
+    setTimeout(scanPage, 300);
+  })();
 
   async function scanPage() {
     try {

@@ -43,7 +43,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(err => sendResponse({ error: err.message }));
     return true;
   }
+
+  // On-demand content script injection for sites not in manifest matches
+  if (request.action === "injectContentScript") {
+    injectContentScriptIfNeeded(request.tabId)
+      .then(sendResponse)
+      .catch(err => sendResponse({ error: err.message }));
+    return true;
+  }
 });
+
+// Inject content script on-demand when user clicks popup on an unlisted site
+async function injectContentScriptIfNeeded(tabId) {
+  try {
+    // Try sending a ping first — if content script is already injected it will respond
+    const pong = await chrome.tabs.sendMessage(tabId, { action: "ping" }).catch(() => null);
+    if (pong && pong.alive) {
+      return { injected: false, reason: "already_injected" };
+    }
+  } catch (_) {
+    // Content script not yet injected
+  }
+
+  // Inject the content script and CSS on-demand using scripting API (requires activeTab)
+  await chrome.scripting.insertCSS({
+    target: { tabId },
+    files: ["content/content.css"]
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content/content.js"]
+  });
+
+  return { injected: true };
+}
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -88,26 +121,61 @@ async function handleSolveQuestions(data) {
   const proxyUrl = config.proxyUrl || DEFAULT_PROXY_URL;
   const apiKey = config.geminiApiKey;
 
+  let result;
+
   // 1. If Proxy URL is configured and user hasn't forced a custom key:
   if (proxyUrl && proxyUrl.trim() && !apiKey) {
     console.log("[Auto MCQ] Using Cloudflare Worker Proxy:", proxyUrl);
-    return await solveViaProxy(proxyUrl.trim(), data);
+    result = await solveViaProxy(proxyUrl.trim(), data);
   }
-
   // 2. If User provided a custom Gemini API Key:
-  if (apiKey && apiKey.trim()) {
+  else if (apiKey && apiKey.trim()) {
     console.log("[Auto MCQ] Using Custom Gemini API Key");
-    return await solveViaDirectGemini(apiKey.trim(), data);
+    result = await solveViaDirectGemini(apiKey.trim(), data);
   }
-
   // 3. If Proxy URL is set even with empty key:
-  if (proxyUrl && proxyUrl.trim()) {
-    return await solveViaProxy(proxyUrl.trim(), data);
+  else if (proxyUrl && proxyUrl.trim()) {
+    result = await solveViaProxy(proxyUrl.trim(), data);
+  }
+  else {
+    throw new Error(
+      "No AI backend configured. Either enter a Gemini API Key or set up your free Cloudflare Worker proxy URL in the popup!"
+    );
   }
 
-  throw new Error(
-    "No AI backend configured. Either enter a Gemini API Key or set up your free Cloudflare Worker proxy URL in the popup!"
-  );
+  // Validate answer schema on client side too (defense-in-depth)
+  if (result && result.answers) {
+    result.answers = validateAnswerSchema(result.answers, (data.questions || []).length);
+  }
+
+  return result;
+}
+
+/**
+ * Client-side answer schema validation (defense-in-depth)
+ */
+function validateAnswerSchema(answers, questionCount) {
+  if (!Array.isArray(answers)) {
+    throw new Error("AI returned invalid answer format (not an array).");
+  }
+
+  return answers.map((ans, idx) => {
+    if (!ans || typeof ans !== "object") {
+      return { questionIndex: idx, selectedOptions: [0], confidence: "low", reasoning: "Fallback" };
+    }
+
+    const qIdx = typeof ans.questionIndex === "number" ? ans.questionIndex : idx;
+    let selOpts = Array.isArray(ans.selectedOptions) ? ans.selectedOptions : [0];
+
+    // Filter to valid non-negative integers only
+    selOpts = selOpts.filter(o => typeof o === "number" && Number.isInteger(o) && o >= 0 && o < 26);
+    if (selOpts.length === 0) selOpts = [0];
+
+    const confidence = typeof ans.confidence === "string" ? ans.confidence.substring(0, 20) : "medium";
+    const reasoning = typeof ans.reasoning === "string" ? ans.reasoning.substring(0, 500) : "";
+
+    return { questionIndex: qIdx, selectedOptions: selOpts, confidence, reasoning };
+  });
 }
 
 /**
@@ -159,7 +227,7 @@ Response format (strict JSON array):
 
   let prompt = "";
   if (videoContext && videoContext.trim()) {
-    prompt += `=== VIDEO/LECTURE CONTEXT ===\n${videoContext}\n\n`;
+    prompt += `=== VIDEO/LECTURE CONTEXT ===\n${videoContext.substring(0, 15000)}\n\n`;
   }
 
   prompt += "=== QUESTIONS TO SOLVE ===\n\n";
@@ -202,7 +270,7 @@ async function handleAnalyzeVideo(data) {
 
   if (apiKey) {
     const systemPrompt = "Summarize the key quiz-relevant points from this lecture transcript.";
-    const summary = await callGeminiWithRetry(apiKey, transcript, systemPrompt);
+    const summary = await callGeminiWithRetry(apiKey, transcript.substring(0, 15000), systemPrompt);
     return { success: true, summary };
   }
 

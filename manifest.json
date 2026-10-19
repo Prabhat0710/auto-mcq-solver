@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto MCQ Solver",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Automatically answers MCQ questions using AI. Extracts video context and solves quizzes.",
   "permissions": [
     "activeTab",
@@ -11,8 +11,7 @@
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
     "https://*.workers.dev/*",
-    "https://*.pages.dev/*",
-    "<all_urls>"
+    "https://*.pages.dev/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
@@ -27,7 +26,23 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://*.guvi.in/*",
+        "https://*.moodle.org/*",
+        "https://*.moodle.com/*",
+        "https://*.instructure.com/*",
+        "https://*.coursera.org/*",
+        "https://*.edx.org/*",
+        "https://docs.google.com/forms/*",
+        "https://*.blackboard.com/*",
+        "https://*.brightspace.com/*",
+        "https://*.d2l.com/*",
+        "https://*.udemy.com/*",
+        "https://*.skillsync.com/*",
+        "https://*.forms.office.com/*",
+        "https://*.hackerrank.com/*",
+        "https://*.hackerearth.com/*"
+      ],
       "js": ["content/content.js"],
       "css": ["content/content.css"],
       "run_at": "document_idle"

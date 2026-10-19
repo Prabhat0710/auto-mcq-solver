@@ -531,10 +531,30 @@
   // ---- Next / Submit Button Detection & Clicking ----
 
   /**
-   * Comprehensive Next/Submit button finder
+   * Denylist: button labels that should NEVER be auto-clicked.
+   * Prevents false-positive clicks on destructive or irrelevant actions.
+   */
+  const BUTTON_DENYLIST = [
+    /delete/i, /remove/i, /logout/i, /log\s*out/i, /sign\s*out/i,
+    /unenroll/i, /drop\s*course/i, /withdraw/i, /cancel\s*enrollment/i,
+    /reset/i, /clear/i, /erase/i, /discard/i,
+    /pay/i, /purchase/i, /buy/i, /checkout/i, /subscribe/i,
+    /close/i, /dismiss/i, /exit/i, /leave/i,
+    /download/i, /export/i, /print/i, /share/i,
+    /report/i, /flag/i, /block/i, /mute/i,
+    /settings/i, /preferences/i, /profile/i, /account/i,
+    /help/i, /support/i, /feedback/i, /contact/i
+  ];
+
+  function isDeniedButton(text) {
+    return BUTTON_DENYLIST.some(pattern => pattern.test(text));
+  }
+
+  /**
+   * Comprehensive Next/Submit button finder with safety guards
    */
   function findNextOrSubmitButton() {
-    // Priority patterns for button labels
+    // Priority patterns for button labels (exact matches only)
     const targetTexts = [
       /^next$/i,
       /^next\s*question$/i,
@@ -565,29 +585,32 @@
         if (!isElementVisible(el)) continue;
         if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
         const text = (el.innerText || el.textContent || el.value || "").trim();
+        if (text.length > 50) continue; // Skip elements with excessive text (likely containers)
+        if (isDeniedButton(text)) continue;
         if (pattern.test(text)) {
           return el;
         }
       }
     }
 
-    // 2. Partial text matches
+    // 2. Partial text matches (with strict denylist)
+    const partialDenyPatterns = /previous|back|cancel|all\s*questions|home|menu|overview|dashboard|library/i;
     for (const el of candidates) {
       if (!isElementVisible(el)) continue;
       if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
-      const text = (el.innerText || el.textContent || el.value || "").trim().toLowerCase();
+      const text = (el.innerText || el.textContent || el.value || "").trim();
+      if (text.length > 50) continue;
+      if (isDeniedButton(text)) continue;
 
-      // Avoid false positives like "Back", "Previous", "Cancel", "View All"
-      if (text.includes("previous") || text.includes("back") || text.includes("cancel") || text.includes("all questions")) {
-        continue;
-      }
+      const lower = text.toLowerCase();
+      if (partialDenyPatterns.test(lower)) continue;
 
-      if (text.includes("next") || text.includes("submit") || text.includes("continue")) {
+      if (lower.includes("next") || lower.includes("submit") || lower.includes("continue")) {
         return el;
       }
     }
 
-    // 3. Search by classes and data attributes
+    // 3. Search by classes and data attributes (only specific quiz-related)
     const attrSelectors = [
       '[data-testid*="next" i]',
       '[data-testid*="submit" i]',
@@ -603,7 +626,10 @@
     for (const sel of attrSelectors) {
       const match = document.querySelector(sel);
       if (match && isElementVisible(match) && !match.disabled) {
-        return match;
+        const text = (match.innerText || match.textContent || "").trim();
+        if (!isDeniedButton(text)) {
+          return match;
+        }
       }
     }
 
@@ -1108,6 +1134,11 @@
 
   // ---- Message Listener ----
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // Ping handler for on-demand injection check
+    if (request.action === "ping") {
+      sendResponse({ alive: true });
+      return;
+    }
     if (request.action === "triggerSolve") {
       startSolving().then(() => sendResponse({ done: true }));
       return true;
